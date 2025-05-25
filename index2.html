@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Peta GeoJSON Sumatera Barat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    #map { height: 95vh; width: 100%; }
+    .info {
+      padding: 6px 8px;
+      background: rgba(255,255,255,0.8);
+      box-shadow: 0 0 15px rgba(0,0,0,0.2);
+      border-radius: 5px;
+      font: 14px/16px Arial, Helvetica, sans-serif;
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      min-width: 180px;
+    }
+    #back-button {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      background: white;
+      padding: 6px 10px;
+      border-radius: 5px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.3);
+      font-family: Arial;
+      cursor: pointer;
+      display: none;
+    }
+    #data-toggle {
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      z-index: 1000;
+      background: white;
+      padding: 6px 10px;
+      border-radius: 5px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.3);
+      font-family: Arial;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="back-button">⬅ Kembali ke Kabupaten</div>
+  <div id="data-toggle">
+    Tampilkan:
+    <select id="data-type">
+      <option value="adhb">PDRB ADHB</option>
+      <option value="adhk">PDRB ADHK</option>
+      <option value="kemiskinan">JUMLAH KEMISKINAN</option>
+      <option value="ketimpangan">KETIMPANGAN REGIONAL</option>
+      <option value="kemiskinanpersen">PERSENTASE KEMISKINAN</option>
+      <option value="pertumbuhan">PERTUMBUHAN EKONOMI</option>
+    </select>
+    Tahun:
+    <select id="tahun">
+      <option value="2019">2019</option>
+      <option value="2020">2020</option>
+      <option value="2021">2021</option>
+      <option value="2022">2022</option>
+      <option value="2023">2023</option>
+      <option value="2024">2024</option>
+    </select>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <script>
+    let map = L.map('map').setView([-0.947, 100.369], 9);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    let allData = [];
+    let pdrbADHBData = [];
+    let pdrbADHKData = [];
+    let kemiskinanData = [];
+    let ketimpanganData = [];
+    let kemiskinanpersenData = [];
+    let pertumbuhanData = [];
+    let kabupatenLayer = null;
+    let kecamatanLayer = null;
+    let labelLayer = null;
+    let currentHoveredLayer = null;
+    let currentDataType = 'adhb';
+    let currentYear = '2019';
+    
+
+    const backButton = document.getElementById('back-button');
+    const dataTypeSelect = document.getElementById('data-type');
+    const tahunSelect = document.getElementById('tahun');
+
+    // Fungsi untuk mengambil data dari database
+    async function fetchData() {
+      try {
+        // Ambil data ADHB
+        const adhbResponse = await fetch('http://localhost:3000/api/pdrb_adhb');
+        pdrbADHBData = await adhbResponse.json();
+        
+        // Ambil data ADHK
+        const adhkResponse = await fetch('http://localhost:3000/api/pdrb_adhk');
+        pdrbADHKData = await adhkResponse.json();
+
+        const kemiskinanResponse = await fetch('http://localhost:3000/api/jumlah_kemiskinan');
+        kemiskinanData = await kemiskinanResponse.json();
+
+        const ketimpanganResponse = await fetch('http://localhost:3000/api/ketimpangan_regional');
+        ketimpanganData = await ketimpanganResponse.json();
+
+        const kemiskinanpersenResponse = await fetch('http://localhost:3000/api/persentase_kemiskinan');
+        kemiskinanpersenData = await kemiskinanpersenResponse.json();
+
+        const pertumbuhanResponse = await fetch('http://localhost:3000/api/pertumbuhan_ekonomi');
+        pertumbuhanData = await pertumbuhanResponse.json();
+        
+        console.log('Data loaded:', { pdrbADHBData, pdrbADHKData, kemiskinanData, ketimpanganData, kemiskinanpersenData, pertumbuhanData });
+      } catch (error) {
+        console.error('Gagal memuat data:', error);
+      }
+    }
+
+    // Fungsi mengambil data statistik berdasarkan nama wilayah & tipe data
+    function getDataByDistrict(name) {
+      let value = null, unit = '', label = '';
+      const tahun = currentYear;
+
+      if (currentDataType === 'adhb') {
+        const found = pdrbADHBData.find(d => d.KabKota.toLowerCase() === name.toLowerCase());
+        value = found ? found[tahun] : null;
+        unit = 'Miliar';
+        label = `PDRB ADHB (${tahun})`;
+      } else if (currentDataType === 'adhk') {
+        const found = pdrbADHKData.find(d => d.KabKota.toLowerCase() === name.toLowerCase());
+        value = found ? found[tahun] : null;
+        unit = 'Miliar';
+        label = `PDRB ADHK (${tahun})`;
+      } else if (currentDataType == 'kemiskinan'){
+        const found = kemiskinanData.find(d => d.KabKota.toLowerCase() === name.toLowerCase());
+        value = found ? found[tahun] : null;
+        unit = 'Ribu';
+        label = `Jumlah Penduduk Miskin (${tahun})`;
+      } else if (currentDataType=='ketimpangan') {
+        const found = ketimpanganData.find(d => d.KabKota.toLowerCase() === name.toLowerCase());
+        value = found ? found [tahun]: null;
+        unit = '%';
+        label = `Jumlah Penduduk Miskin (${tahun})`;
+      } else if (currentDataType=='kemiskinanpersen') {
+        const found = kemiskinanpersenData.find(d => d.KabKota.toLowerCase() === name.toLowerCase());
+        value = found ? found [tahun]: null;
+        unit = '%';
+        label = `Persentase Kemiskinan (${tahun})`;
+      } else if (currentDataType==='pertumbuhan') {
+        const found = pertumbuhanData.find(d => d.KabKota.toLowerCase() === name.toLowerCase());
+        value = found ? found [tahun]: null;
+        unit = '%';
+        label = `Pertumbuhan Ekonomi (${tahun})`;
+      }
+
+      return { value, unit, label };
+    }
+
+    const info = L.control();
+    info.onAdd = function () {
+      this._div = L.DomUtil.create('div', 'info');
+      this.update();
+      return this._div;
+    };
+    info.update = function (props) {
+      if (props) {
+        const name = props.district || props.sub_district;
+        const { value, unit, label } = getDataByDistrict(name);
+        this._div.innerHTML = `<b>${name}</b><br>` + 
+          (value !== null ? `${label}: ${value.toLocaleString('id-ID')} ${unit}` : 'Data tidak tersedia');
+      } else {
+        this._div.innerHTML = 'Arahkan ke wilayah';
+      }
+    };
+    info.addTo(map);
+
+    // Ambil data GeoJSON dari API
+    fetch('http://localhost:3000/api/geojson-data')
+      .then(res => res.json())
+      .then(data => {
+        allData = data;
+
+        // Transformasi data menjadi GeoJSON lengkap per kecamatan
+        window.sumateraBaratGeoJSON = {
+          type: 'FeatureCollection',
+          features: data.map(item => ({
+            type: 'Feature',
+            properties: {
+              district: item.district,
+              sub_district: item.sub_district
+            },
+            geometry: item.geojson
+          }))
+        };
+
+        // Ambil data PDRB dari database
+        fetchData().then(() => {
+          showKabupatenLayer();
+        });
+      })
+      .catch(e => {
+        console.error('Gagal load data dari API:', e);
+      });
+
+    function showKabupatenLayer() {
+      if (kecamatanLayer) {
+        map.removeLayer(kecamatanLayer);
+        kecamatanLayer = null;
+      }
+      if (labelLayer) {
+        map.removeLayer(labelLayer);
+        labelLayer = null;
+      }
+      if (kabupatenLayer) {
+        map.removeLayer(kabupatenLayer);
+        kabupatenLayer = null;
+      }
+      backButton.style.display = 'none';
+
+      // Gabungkan fitur berdasarkan district menggunakan turf.union
+      const grouped = {};
+      sumateraBaratGeoJSON.features.forEach(f => {
+        const kab = f.properties.district;
+        if (!grouped[kab]) grouped[kab] = [];
+        grouped[kab].push(turf.clone(f));
+      });
+
+      const kabFeatures = [];
+      for (const [kab, features] of Object.entries(grouped)) {
+        let merged = features[0];
+        for (let i = 1; i < features.length; i++) {
+          try {
+            merged = turf.union(merged, features[i]);
+          } catch (err) {
+            console.warn(`Union gagal untuk ${kab}`, err);
+          }
+        }
+        merged.properties = { district: kab };
+        kabFeatures.push(merged);
+      }
+
+      kabupatenLayer = L.geoJSON(kabFeatures, {
+        style: {
+          weight: 1,
+          color: '#fff',
+          fillColor: '#f93',
+          fillOpacity: 0.6,
+          dashArray: '3'
+        },
+        onEachFeature: (feature, layer) => {
+          layer.on({
+            mouseover: e => {
+              if (currentHoveredLayer) kabupatenLayer.resetStyle(currentHoveredLayer);
+              e.target.setStyle({
+                weight: 3,
+                color: '#333',
+                fillOpacity: 0.8
+              });
+              currentHoveredLayer = e.target;
+              info.update(feature.properties);
+            },
+            mouseout: e => {
+              kabupatenLayer.resetStyle(e.target);
+              currentHoveredLayer = null;
+              info.update();
+            },
+            click: () => {
+              showKecamatan(feature.properties.district);
+            }
+          });
+          layer.bindPopup(`<b>Kabupaten/Kota:</b> ${feature.properties.district}`);
+        }
+      }).addTo(map);
+
+      map.fitBounds(kabupatenLayer.getBounds());
+    }
+
+    function showKecamatan(districtName) {
+      if (kabupatenLayer) {
+        map.removeLayer(kabupatenLayer);
+        kabupatenLayer = null;
+      }
+      if (kecamatanLayer) {
+        map.removeLayer(kecamatanLayer);
+        kecamatanLayer = null;
+      }
+      if (labelLayer) {
+        map.removeLayer(labelLayer);
+        labelLayer = null;
+      }
+
+      const kecFeatures = sumateraBaratGeoJSON.features.filter(f => f.properties.district === districtName);
+
+      kecamatanLayer = L.geoJSON(kecFeatures, {
+        style: {
+          weight: 1,
+          color: '#fff',
+          fillColor: '#f93',
+          fillOpacity: 0.6,
+          dashArray: '3'
+        },
+        onEachFeature: (feature, layer) => {
+          layer.on({
+            mouseover: e => {
+              if (currentHoveredLayer) kecamatanLayer.resetStyle(currentHoveredLayer);
+              e.target.setStyle({
+                weight: 3,
+                color: '#333',
+                fillOpacity: 0.8
+              });
+              currentHoveredLayer = e.target;
+              info.update(feature.properties);
+            },
+            mouseout: e => {
+              kecamatanLayer.resetStyle(e.target);
+              currentHoveredLayer = null;
+              info.update();
+            }
+          });
+          layer.bindPopup(`<b>Kecamatan:</b> ${feature.properties.sub_district}<br><b>Kabupaten/Kota:</b> ${feature.properties.district}`);
+        }
+      }).addTo(map);
+
+      labelLayer = L.layerGroup();
+      kecFeatures.forEach(f => {
+        const center = turf.centerOfMass(f).geometry.coordinates;
+        const label = L.marker([center[1], center[0]], {
+          icon: L.divIcon({
+            className: 'label',
+            html: `<span style="font-size:12px;font-weight:bold;color:#222;background:white;padding:2px 4px;border-radius:3px;">${f.properties.sub_district}</span>`,
+            iconSize: [100, 20],
+            iconAnchor: [50, 10]
+          })
+        });
+        labelLayer.addLayer(label);
+      });
+      labelLayer.addTo(map);
+
+      map.fitBounds(kecamatanLayer.getBounds());
+      backButton.style.display = 'block';
+    }
+
+    backButton.onclick = () => {
+      showKabupatenLayer();
+      info.update();
+    };
+
+    dataTypeSelect.addEventListener('change', e => {
+      currentDataType = e.target.value;
+      if (currentHoveredLayer) {
+        info.update(currentHoveredLayer.feature.properties);
+      }
+    });
+
+    tahunSelect.addEventListener('change', e => {
+      currentYear = e.target.value;
+      if (currentHoveredLayer) {
+        info.update(currentHoveredLayer.feature.properties);
+      }
+    });
+
+  </script>
+</body>
+</html>
