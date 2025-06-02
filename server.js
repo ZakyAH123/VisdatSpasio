@@ -15,6 +15,7 @@ const dbConfig = {
   queueLimit: 0
 };
 
+
 // Membuat connection pool
 const pool = mysql.createPool(dbConfig);
 
@@ -103,6 +104,16 @@ app.get('/api/pertumbuhan_ekonomi', async (req, res) => {
   }
 });
 
+app.get('/api/kebakaran', async (req, res) => {
+  try {
+    const [results] = await pool.query('SELECT KabKota, `2020`, `2021`, `2022`, `2023`, `2024` FROM kebakaran');
+    res.json(results);
+  } catch (err) {
+    console.error('Query error:', err);
+    res.status(500).json({ error: 'Gagal mengambil data jumlah kemiskinan' });
+  }
+});
+
 // Endpoint untuk mendapatkan daftar kabupaten/kota
 app.get('/api/kabupaten', async (req, res) => {
   try {
@@ -114,6 +125,7 @@ app.get('/api/kabupaten', async (req, res) => {
     res.status(500).json({ error: 'Gagal mengambil daftar kabupaten' });
   }
 });
+
 
 // Jalankan server
 app.listen(port, () => {
